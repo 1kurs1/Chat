@@ -1,11 +1,19 @@
 #include <iostream>
 #include <cstring>
-#include <unistd.h>
 #include <vector>
 #include <thread>
 #include <mutex>
 #include <algorithm>
+
+#ifdef _WIN32
+#include <winsock2.h>
+#include <ws2tcpip.h>
+#else
+#include <unistd.h>
 #include <arpa/inet.h>
+#endif
+
+// ws2_32.lib
 
 std::mutex mtx;
 std::vector<int> clientSockets;
@@ -18,7 +26,11 @@ void handleClient(int clientSocket){
         if(receivedBytes <= 0){
             std::lock_guard<std::mutex> lock(mtx);
             clientSockets.erase(std::remove(clientSockets.begin(), clientSockets.end(), clientSocket), clientSockets.end());
+            #ifdef _WIN32
+            closesocket(clientSocket);
+            #else
             close(clientSocket);
+            #endif
             std::cout << "client disconnected! Clients: " << clientSockets.size() << '\n';
             break; 
         }
@@ -33,6 +45,14 @@ void handleClient(int clientSocket){
 }
 
 int main(){
+    #ifdef _WIN32
+    WSADATA wsaData;
+    if(WSAStartup(MAKEWORD(2, 2), &wsaData) != 0){
+        std::cerr << "WSAStartup failed!\n";
+        return EXIT_FAILURE;
+    }
+    #endif
+
     int serverSocket = socket(AF_INET, SOCK_STREAM, 0);
     if(serverSocket == -1){
         std::cerr << "failed to create socket!\n";
@@ -45,13 +65,21 @@ int main(){
     serverAddress.sin_port = htons(12345);
     if(bind(serverSocket, (sockaddr*)&serverAddress, sizeof(serverAddress)) == -1){
         std::cerr << "failed to bind socket!\n";
+        #ifdef _WIN32
+        closesocket(serverSocket);
+        #else
         close(serverSocket);
+        #endif
         return EXIT_FAILURE;
     }
 
     if(listen(serverSocket, 5) == -1){
         std::cerr << "failed to listen on socket!\n";
+        #ifdef _WIN32
+        closesocket(serverSocket);
+        #else
         close(serverSocket);
+        #endif
         return EXIT_FAILURE;
     }
 
@@ -73,6 +101,11 @@ int main(){
         std::thread(handleClient, clientSocket).detach();
     }
 
+    #ifdef _WIN32
+    closesocket(serverSocket);
+    WSACleanup();
+    #else
     close(serverSocket);
+    #endif
     return EXIT_SUCCESS;
 }
